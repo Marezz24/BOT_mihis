@@ -291,6 +291,42 @@ async function insertarReqVentilatorio(reqData) {
 }
 
 /**
+ * Inserta múltiples registros en la tabla hospitalizacion_registro en una sola consulta.
+ * @param {Array} registros - Arreglo de objetos con las propiedades:
+ *   hreg_fecha, hreg_estado, hreg_condicion, hreg_func_id.
+ * @returns {Array} - Arreglo de registros insertados.
+ */
+async function insertarHospitalizacionRegistroBulk(registros) {
+  const client = new Client(config);
+  await client.connect();
+  try {
+    let query = "INSERT INTO hospitalizacion_registro (hreg_fecha, hest_id, hcon_id, hreg_func_id) VALUES ";
+    const values = [];
+    const placeholders = registros.map((reg, index) => {
+      const baseIndex = index * 4;
+      values.push(
+        reg.hreg_fecha ?? new Date(),
+        reg.hreg_estado ?? 1,
+        reg.hreg_condicion ?? 1,
+        reg.hreg_func_id
+      );
+      return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4})`;
+    });
+    query += placeholders.join(", ") + " RETURNING *;";
+    const result = await client.query(query, values);
+    console.log("Registros insertados en hospitalizacion_registro:", result.rows);
+    return result.rows;
+  } catch (error) {
+    console.error("Error al insertar en hospitalizacion_registro:", error);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+
+
+/**
  * Función principal.
  * Se procesa el JSON obtenido del Excel y se realizan las inserciones correspondientes.
  */
@@ -422,6 +458,21 @@ async function Principal() {
         ">> No se encontró la sección ReqVentilatorio o no es un array."
       );
     }
+
+    // 2.2 Procesar evolución de estado en masa (hospitalizacion_registro)
+    if (datosExcelDesignado.EvolucionEstado) {
+      // Si EvolucionEstado no es un arreglo, lo convertimos en uno
+      const evolucionEstado = Array.isArray(datosExcelDesignado.EvolucionEstado)
+        ? datosExcelDesignado.EvolucionEstado
+        : [datosExcelDesignado.EvolucionEstado];
+
+      // Procesamos los datos para obtener el formato requerido
+
+      // Insertamos en masa los registros en la tabla hospitalizacion_registro
+      await insertarHospitalizacionRegistroBulk(evolucionEstado);
+    }
+
+
     console.log(">> PROCESO FINALIZADO CORRECTAMENTE.");
   } catch (error) {
     console.error(">> Error en el proceso general:", error);
