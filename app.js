@@ -101,7 +101,6 @@ async function procesarFuncionario(nombre) {
 
 /**
  * Inserta un registro en la tabla hospitalizacion.
- * Se utiliza la sección DatosPaciente (ejemplo: admisión) y la información de la sección Resumen.
  */
 async function insertarHospitalizacion(hospData) {
   console.log(">> Insertando hospitalización...");
@@ -146,12 +145,83 @@ async function insertarHospitalizacion(hospData) {
 }
 
 /**
+ * Inserta un registro en la tabla hospitalizacion_observaciones.
+ * (Función antigua para inserción individual, se mantiene si se necesita)
+ */
+async function insertarHospitalizacionObservaciones(obsData) {
+  const client = new Client(config);
+  await client.connect();
+  try {
+    const insertQuery = `
+      INSERT INTO hospitalizacion_observaciones (
+        hosp_id, hospo_fecha, hospo_observacion, hospo_func_id
+      ) VALUES ($1, $2, $3, $4)
+      RETURNING *;
+    `;
+    const values = [
+      obsData.hosp_id,
+      obsData.hospo_fecha,
+      obsData.hospo_observacion,
+      obsData.hospo_func_id,
+    ];
+    const result = await client.query(insertQuery, values);
+    console.log(
+      "Registro insertado en hospitalizacion_observaciones:",
+      result.rows[0]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error("Error al insertar en hospitalizacion_observaciones:", error);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Inserta múltiples registros en la tabla hospitalizacion_observaciones en una sola consulta.
+ * @param {Array} obsArray - Array de objetos con las propiedades:
+ *   - hosp_id, hospo_fecha, hospo_observacion, hospo_func_id.
+ * @returns {Array} - Array de registros insertados.
+ */
+async function insertarHospitalizacionObservacionesBulk(obsArray) {
+  const client = new Client(config);
+  await client.connect();
+  try {
+    let query = `INSERT INTO hospitalizacion_observaciones (hosp_id, hospo_fecha, hospo_observacion, hospo_func_id) VALUES `;
+    const values = [];
+    const placeholders = obsArray.map((obs, index) => {
+      const baseIndex = index * 4;
+      values.push(
+        obs.hosp_id,
+        obs.hospo_fecha,
+        obs.hospo_observacion,
+        obs.hospo_func_id
+      );
+      return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${
+        baseIndex + 4
+      })`;
+    });
+    query += placeholders.join(", ") + " RETURNING *;";
+    const result = await client.query(query, values);
+    console.log("Observaciones insertadas en masa:", result.rows);
+    return result.rows;
+  } catch (error) {
+    console.error(
+      "Error al insertar en hospitalizacion_observaciones en masa:",
+      error
+    );
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
  * Inserta un registro en la tabla de requerimiento ventilatorio.
- * Se utiliza la información del array ReqVentilatorio y el funcionario asociado.
  */
 async function insertarReqVentilatorio(reqData) {
   console.log(">> Insertando requerimiento ventilatorio...");
-  const { Client } = require("pg");
   const client = new Client(config);
   await client.connect();
 
@@ -181,11 +251,9 @@ async function insertarReqVentilatorio(reqData) {
       console.warn("⚠ Fecha inválida recibida, usando la fecha de hoy.");
       fecha = new Date();
     }
-
     const year = fecha.getFullYear();
     const month = String(fecha.getMonth() + 1).padStart(2, "0");
     const day = String(fecha.getDate()).padStart(2, "0");
-
     fechaConHora = `${year}-${month}-${day} 08:00:00`;
   } catch (error) {
     console.error("Error en el formato de la fecha:", error);
@@ -224,12 +292,11 @@ async function insertarReqVentilatorio(reqData) {
 
 /**
  * Función principal.
- * Se procesa el JSON obtenido del Excel y se realizan las inserciones correspondientes
- * únicamente para las secciones que cuenten con el funcionario definido.
+ * Se procesa el JSON obtenido del Excel y se realizan las inserciones correspondientes.
  */
 async function Principal() {
   console.log(">> Iniciando proceso de carga masiva...");
-  let hosp_id = null; // Declaramos la variable para hosp_id
+  let hosp_id = null; // Variable para hosp_id
 
   try {
     // Se procesa el Excel y se obtiene el objeto JSON
@@ -274,7 +341,39 @@ async function Principal() {
             ">> Hospitalización insertada:",
             resultadoHospitalizacion
           );
-          hosp_id = resultadoHospitalizacion.hosp_id; // Asignamos el hosp_id
+          hosp_id = resultadoHospitalizacion.hosp_id;
+
+          // 2.1 Procesar observaciones (HistObserv) en masa
+          if (datosExcelDesignado.HistObserv) {
+            // Si HistObserv no es un array, lo convertimos en uno
+            const observaciones = Array.isArray(datosExcelDesignado.HistObserv)
+              ? datosExcelDesignado.HistObserv
+              : [datosExcelDesignado.HistObserv];
+
+            // Obtener el funcionario para las observaciones (usando el mismo funcAdmision)
+            let hospo_func_id = null;
+            if (datosPaciente.funcAdmision) {
+              const funcionarioObs = await procesarFuncionario(
+                datosPaciente.funcAdmision
+              );
+              hospo_func_id = funcionarioObs ? funcionarioObs.func_id : null;
+            }
+
+            // Mapear cada observación al formato requerido
+            const observacionesData = observaciones.map((obs) => ({
+              hosp_id: hosp_id,
+              hospo_fecha: obs.historialHistObserv || null,
+              hospo_observacion: obs.evolucionHistObserv || null,
+              hospo_func_id: hospo_func_id,
+            }));
+
+            const resultadoObservaciones =
+              await insertarHospitalizacionObservacionesBulk(observacionesData);
+            console.log(
+              "Observaciones de hospitalización insertadas:",
+              resultadoObservaciones
+            );
+          }
         } else {
           console.log(
             ">> El funcionario de admisión no existe en la BD. Se omitirá la inserción de hospitalización."
