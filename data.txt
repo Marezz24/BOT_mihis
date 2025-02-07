@@ -1,0 +1,99 @@
+SELECT pacientes.pac_id FROM pacientes;
+
+/calcular la fecha de nacimiento aprox del paciente en base a la edad/
+
+/* en el caso de no existir paciente generar un insert*/
+INSERT INTO pacientes (
+        pac_rut, 
+        pac_nombres, 
+        pac_appat,
+        pac_fono
+        ) 
+VALUES ();
+
+/===========================================================================/
+
+INSERT INTO paciente_alergias (
+        pac_id, 
+        alergia
+        ) 
+VALUES ();
+
+/===========================================================================/
+
+SELECT * FROM diagnostios d WHERE d.diag_cod = 'A16.5';
+SELECT * FROM funcionarios;  
+
+INSERT INTO hospitalizacion (
+        hosp_fecha_ing, 
+        hosp_pac_id, 
+        hosp_func_id,
+        hosp_criticidad,
+        hosp_diag_cod,
+        hosp_diagnostico,
+        hosp_cod,
+        hosp_servicio /clasificacion_cama/
+        ) 
+VALUES ();
+
+/===========================================================================/
+
+INSERT INTO paciente_traslado (
+        petras_fecha, 
+        petras_cama_origen, 
+        petras_cama_destino, 
+        ptras_func_id
+        ) 
+VALUES ();
+
+/===========================================================================/
+
+censo_diario
+censo_fecha --> fecha-hora
+censo_diario --> categoria
+func_id --> funcionario
+
+/===========================================================================/
+
+ReqVentilatorio
+
+historial_requerimiento_vent
+req_vent_fecha
+req_vent_desc
+estado_covid
+func_id
+
+/===========================================================================/
+
+EvloucionEstado
+hospitalizacion_registro
+href_fecha
+hrest_id
+hcon_id
+hreg_func_id
+
+/===========================================================================/
+
+AltasCanceladas
+
+petras_fecha
+petras_cama_origen
+
+petras_cama_destino
+petras_func_id
+
+/===========================================================================/
+
+histobserv
+
+hospitalizacion_observaciones
+hospo_fecha
+hospo_obervacion
+
+/===========================================================================/
+
+HistNecesidades
+
+hospitalizacion_necesidades
+hospon_fecha
+hospon_observacion
