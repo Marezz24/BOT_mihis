@@ -48,10 +48,10 @@ VALUES ();
 
 /===========================================================================/
 
-censo_diario
-censo_fecha --> fecha-hora-->EvloucionEstado
-censo_diario --> categoria-->Resumen
-func_id --> funcionario-->
+  censo_diario
+  censo_fecha --> fecha-hora-->EvloucionEstado
+  censo_diario --> categoria-->Resumen
+  func_id --> funcionario-->
 
 /===========================================================================/
 
