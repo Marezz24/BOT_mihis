@@ -222,7 +222,7 @@ function procesarExcels() {
         const data = xlsx.utils.sheet_to_json(sheet, { header: 1, range: 3 });
         excelObj.sheets["Traslados"] = data.map((row) => ({
           fechaAsigTras: row[0] ? extractBefore(row[0], " ") : null,
-          origenTras: row[1] || null,
+          origenTras: extractBefore(row[1], "-") || null,
           camaTras: row[2] || null,
           clasificacion_camaTras: row[3] ? extractBefore(row[3], "-") : null,
           numCamaTras: row[4] || null,
