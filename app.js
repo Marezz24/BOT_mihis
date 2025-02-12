@@ -10,6 +10,36 @@ const procesarExcels = require("./botCargaMasiva/bot");
 
 // Configuración de conexión a PostgreSQL
 
+// Función para formatear fechas (por ejemplo, "2025-02-06")
+function formatDate(dateValue) {
+  // Verificamos si la fecha ya está en el formato deseado ("YYYY-MM-DD")
+  if (dayjs(dateValue, 'YYYY-MM-DD', true).isValid()) {
+    return dateValue;
+  }
+
+  // Definimos los formatos alternativos que aceptamos
+  const formatosAceptados = ['DD/MM/YYYY', 'YYYY/MM/DD'];
+
+  // Intentamos interpretar la fecha en cada uno de los formatos aceptados
+  for (const formato of formatosAceptados) {
+    const fecha = dayjs(dateValue, formato, true); // El modo estricto (true) verifica el formato exacto
+    if (fecha.isValid()) {
+      return fecha.format('YYYY-MM-DD');
+    }
+  }
+}
+
+// Funciones para extraer texto antes o después de un separador
+function extractBefore(text, separator) {
+  const index = text.indexOf(separator);
+  return index !== -1 ? text.substring(0, index).trim() : text.trim();
+}
+
+function extractAfter(text, separator) {
+  const index = text.indexOf(separator);
+  return index !== -1 ? text.substring(index + 1).trim() : "";
+}
+
 
 const config = {
   host: "10.4.199.133",
@@ -147,39 +177,88 @@ async function procesarFuncionario(nombre) {
   }
 }
 
+//INSERTAR NECESIDADES
+async function insertarHospitalizacionNecesidadesBulk(neceArray) {
+  if (!neceArray || neceArray.length === 0) {
+    console.log(
+      ">> No hay registros para insertar en hospitalizacion_necesidades."
+    );
+    return [];
+  }
+  const client = new Client(config);
+  await client.connect();
+  try {
+    let query = `INSERT INTO hospitalizacion_necesidades (hosp_id, hospn_fecha, hospn_observacion, hospn_func_id) VALUES `;
+    const values = [];
+    const placeholders = neceArray.map((nece, index) => {
+      const baseIndex = index * 4;
+      values.push(
+        nece.hosp_id,
+        nece.hospon_fecha,
+        nece.hospon_observacion,
+        nece.hospon_func_id
+      );
+      return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${
+        baseIndex + 4
+      })`;
+    });
+    query += placeholders.join(", ") + " RETURNING *;";
+    const result = await client.query(query, values);
+    console.log(">> Necesidades insertadas en masa:", result.rows);
+    return result.rows;
+  } catch (error) {
+    console.error(
+      "Error al insertar en hospitalizacion_necesidades en masa:",
+      error
+    );
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 
 /**
  * Inserta un registro en la tabla hospitalizacion.
  */
 async function insertarHospitalizacion(hospData) {
   console.log(">> Insertando hospitalización...");
+  console.log(hospData)
   const client = new Client(config);
   await client.connect();
   try {
-    // Primero, eliminar registros dependientes en hospitalizacion_necesidades
+
+    
+    // // Primero, eliminar registros dependientes en hospitalizacion_necesidades
     const deleteDependentQuery = `
       DELETE FROM hospitalizacion_necesidades
-      WHERE hosp_id IN (
-        SELECT hosp_id FROM hospitalizacion
-        WHERE hosp_pac_id = $1 AND hosp_fecha_ing = $2 AND hosp_func_id = $3
-      );
+      WHERE hosp_id = $1;
     `;
-    await client.query(deleteDependentQuery, [
-      hospData.hosp_pac_id,
-      hospData.hosp_fecha_ing,
-      hospData.hosp_func_id,
-    ]);
+    await client.query(deleteDependentQuery, [hospData.hosp_id]);
 
-    // Eliminar registro duplicado en hospitalizacion
+    // Eliminar todos los registros de adjunto_hospitalizacion que referencian el hosp_id
+    const deleteAdjunto_hospitalizacionquery = `
+      DELETE FROM adjunto_hospitalizacion
+      WHERE hosp_id = $1;
+    `;
+    await client.query(deleteAdjunto_hospitalizacionquery, [hospData.hosp_id]);
+    console.log("Se eliminaron todos los registros de adjunto_hospitalizacion para hosp_id:", hospData.hosp_id);
+
+    //Eliminar los registros de hospitalizaciones_externas cuando el id de hospitalizacioin sea igual a hosp_id
+    const deleteHspitalizaciones_externas = `
+      DELETE FROM hospitalizaciones_externas
+      WHERE hosp_id = $1;
+    `;
+    await client.query(deleteHspitalizaciones_externas, [hospData.hosp_id]);
+    console.log("Se eliminaron todos los registros de hospitalizaciones_externas para hosp_id:", hospData.hosp_id);
+
+    // Eliminar registro duplicado en hospitalizacion (si existe) basado en el hosp_id
     const deleteQuery = `
       DELETE FROM hospitalizacion
-      WHERE hosp_pac_id = $1 AND hosp_fecha_ing = $2 AND hosp_func_id = $3;
+      WHERE hosp_id = $1;
     `;
-    await client.query(deleteQuery, [
-      hospData.hosp_pac_id,
-      hospData.hosp_fecha_ing,
-      hospData.hosp_func_id,
-    ]);
+    await client.query(deleteQuery, [hospData.hosp_id]);
+    
 
     // Procesar el valor del servicio: si es "(Sin Asignar...)", "/" o cadena vacía, se asigna null.
     let servicioValue = hospData.hosp_servicio;
@@ -190,6 +269,7 @@ async function insertarHospitalizacion(hospData) {
     // Preparar la consulta de inserción
     const insertQuery = `
       INSERT INTO hospitalizacion (
+        hosp_id,
         hosp_fecha_ing, 
         hosp_pac_id, 
         hosp_func_id,
@@ -197,10 +277,12 @@ async function insertarHospitalizacion(hospData) {
         hosp_diag_cod,
         hosp_diagnostico,
         hosp_servicio
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING hosp_id;
     `;
+
     const values = [
+      hospData.hosp_id,
       hospData.hosp_fecha_ing,
       hospData.hosp_pac_id,
       hospData.hosp_func_id,
@@ -281,9 +363,9 @@ async function insertarHospitalizacionObservacionesBulk(obsArray) {
     for (const obs of obsArray) {
       const deleteQuery = `
         DELETE FROM hospitalizacion_observaciones
-        WHERE hosp_id = $1 AND hospo_fecha = $2 AND hospo_func_id = $3;
+        WHERE hosp_id = $1;
       `;
-      await client.query(deleteQuery, [obs.hosp_id, obs.hospo_fecha, obs.hospo_func_id]);
+      await client.query(deleteQuery, [obs.hosp_id]);
     }
 
     // Construir la consulta de inserción masiva sin incluir un punto y coma final
@@ -344,15 +426,10 @@ async function insertarReqVentilatorio(reqData) {
   // Manejo de fecha
   let fechaConHora;
   try {
-    let fecha = new Date(reqData.vent_fecha);
-    if (isNaN(fecha.getTime())) {
-      console.warn("⚠ Fecha inválida recibida, usando la fecha de hoy.");
-      fecha = new Date();
-    }
-    const year = fecha.getFullYear();
-    const month = String(fecha.getMonth() + 1).padStart(2, "0");
-    const day = String(fecha.getDate()).padStart(2, "0");
-    fechaConHora = `${year}-${month}-${day} 08:00:00`;
+    let fecha = reqData.vent_fecha;
+    const extraerFecha = extractBefore(fecha, " ");
+    fechaConHora = formatDate(extraerFecha) ? formatDate(extraerFecha) : new Date().toLocaleDateString();
+
   } catch (error) {
     console.error("Error en el formato de la fecha:", error);
     throw new Error("Error procesando la fecha.");
@@ -360,7 +437,7 @@ async function insertarReqVentilatorio(reqData) {
 
   // Recortar valores que puedan ser muy largos
   const vent_tipo_truncado = reqData.vent_tipo ? reqData.vent_tipo.substring(0, 15) : null;
-  const cargo_truncado = reqData.cargo ? reqData.cargo.substring(0, 15) : null;
+  const fechacon = reqData.cargo ? reqData.cargo.substring(0, 15) : null;
 
   try {
     // Eliminar registro duplicado si existe (criterio: req_vent_fecha, func_id, hosp_id)
@@ -400,7 +477,7 @@ async function insertarReqVentilatorio(reqData) {
  *   hreg_fecha, hreg_estado, hreg_condicion, hreg_func_id.
  * @returns {Array} - Arreglo de registros insertados.
  */
-async function insertarHospitalizacionRegistroBulk(registros) {
+async function insertarHospitalizacionRegistroBulk(registros, hosp_id) {
   // Si no hay registros, se retorna un array vacío para evitar armar una consulta inválida
   if (!registros || registros.length === 0) {
     console.log(">> No hay registros para insertar en hospitalizacion_registro.");
@@ -414,29 +491,27 @@ async function insertarHospitalizacionRegistroBulk(registros) {
     for (const reg of registros) {
       const deleteQuery = `
         DELETE FROM hospitalizacion_registro
-        WHERE hreg_fecha = $1 AND hest_id = $2 AND hcon_id = $3 AND hreg_func_id = $4;
+        WHERE hosp_id = $1 OR hosp_id = NULL;
       `;
       await client.query(deleteQuery, [
-        reg.hreg_fecha ?? new Date(),
-        reg.hreg_estado ?? 1,
-        reg.hreg_condicion ?? 1,
-        reg.hreg_func_id,
+        hosp_id,
       ]);
     }
 
     // Construir la consulta de inserción masiva
-    let query = "INSERT INTO hospitalizacion_registro (hreg_fecha, hest_id, hcon_id, hreg_func_id) VALUES ";
+    let query = "INSERT INTO hospitalizacion_registro (hosp_id, hreg_fecha, hest_id, hcon_id, hreg_func_id) VALUES ";
     const values = [];
     const placeholders = registros.map((reg, index) => {
       const baseIndex = index * 4;
       values.push(
+        hosp_id,
         reg.hreg_fecha ?? new Date(),
         reg.hreg_estado ?? 1,
         reg.hreg_condicion ?? 1,
         reg.hreg_func_id
       );
       // Por ejemplo, para el primer registro genera: ($1, $2, $3, $4)
-      return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4})`;
+      return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5})`;
     });
     // Importante: no incluir punto y coma final, ya que pg no lo requiere
     query += placeholders.join(", ") + " RETURNING *";
@@ -458,18 +533,40 @@ async function insertarHospitalizacionRegistroBulk(registros) {
  * @returns {Object} - Objeto con la propiedad tcama_id del registro insertado.
  */
 async function crearCama(tcama_tipo) {
-  const client = new Client(config);
-  await client.connect();
-  try {
-    const insertQuery = "INSERT INTO clasifica_camas (tcama_tipo) VALUES ($1) RETURNING tcama_id;";
-    const result = await client.query(insertQuery, [tcama_tipo]);
-    console.log(`Cama creada con tipo "${tcama_tipo}".`);
-    return result.rows[0];
-  } catch (error) {
-    console.error("Error al crear cama:", error);
-    throw error;
-  } finally {
-    await client.end();
+  if (tcama_tipo === "Unidad de Parto Integral") {
+    const client = new Client(config);
+    const tipoClasificacion = "Unidad de Parto Integral";
+    try {
+      const insertQuery = "INSERT INTO clasifica_camas (tcama_tipo, tcama_num_ini, tcama_num_fin) VALUES ($1, $2, $3) RETURNING tcama_id;";
+      const result = await client.query(insertQuery, [tipoClasificacion, 1902, 1912]);
+      console.log(`Cama creada con tipo "${tipoClasificacion}".`);
+      return result.rows[0];
+    } catch (error) {
+      console.error("Error al crear cama:", error);
+      throw error;
+    } finally {
+      await client.end();
+    }
+  } else {
+    const client = new Client(config);
+    await client.connect();
+    try {
+      //consultamos por el valor máximo para sumarle 1 antes de agregarlo como valor inicial de otro
+      const selectQuery_tcama_num_fin = "SELECT MAX(tcama_num_fin) FROM clasifica_camas;";
+      //tomamos el valor y le sumamos 1
+      const tcama_num_ini =+ selectQuery_tcama_num_fin;
+      //ahora para el tcama_num_fin le sumamos 10
+      const tcama_num_fin = tcama_num_ini + 10;
+      const insertQuery = "INSERT INTO clasifica_camas (tcama_tipo, tcama_num_ini, tcama_num_fin) VALUES ($1, $2, $3) RETURNING tcama_id;";
+      const result = await client.query(insertQuery, [tcama_tipo, tcama_num_ini, tcama_num_fin]);
+      console.log(`Cama creada con tipo "${tcama_tipo}".`);
+      return result.rows[0];
+    } catch (error) {
+      console.error("Error al crear cama:", error);
+      throw error;
+    } finally {
+      await client.end();
+    }
   }
 }
 
@@ -631,7 +728,7 @@ async function Principal() {
       console.log(">> Paciente procesado:", paciente);
 
       // Variable para hosp_id, se reinicia para cada excel
-      let hosp_id = null;
+      const hosp_id = datosExcelDesignado?.Resumen?.ctaCorriente;
 
       // 2. Procesar hospitalización usando "DatosPaciente"
       if (datosExcelDesignado.DatosPaciente) {
@@ -639,11 +736,12 @@ async function Principal() {
         if (datosPaciente.funcAdmision && datosPaciente.funcAdmision.trim() !== "") {
           const funcionarioAdmision = await procesarFuncionario(datosPaciente.funcAdmision);
           if (funcionarioAdmision) {
-            const hosp_fecha_ing = datosPaciente.admision
-              ? formatSimpleDate(datosPaciente.admision, "DD/MM/YYYY")
+            const hosp_fecha_ing = datosPaciente.hospitalizacion
+              ? formatDate(datosPaciente.hospitalizacion)
               : null;
             const hospData = {
-              hosp_fecha_ing,
+              hosp_id: datosExcelDesignado.Resumen?.ctaCorriente,
+              hosp_fecha_ing: datosExcelDesignado.Resumen?.fechaIngreso,
               hosp_pac_id: paciente.pac_id,
               hosp_func_id: funcionarioAdmision.func_id,
               hosp_criticidad: datosExcelDesignado.Resumen?.categoria || null,
@@ -653,10 +751,62 @@ async function Principal() {
             };
             const resultadoHospitalizacion = await insertarHospitalizacion(hospData);
             console.log(">> Hospitalización insertada:", resultadoHospitalizacion);
-            hosp_id = resultadoHospitalizacion.hosp_id;
+            // 2.1 Procesar observaciones (HistObserv) en masa
+          if (datosExcelDesignado.HistObserv) {
+            // Si HistObserv no es un array, lo convertimos en uno
+            const observaciones = Array.isArray(datosExcelDesignado.HistObserv)
+              ? datosExcelDesignado.HistObserv
+              : [datosExcelDesignado.HistObserv];
+
+            // Obtener el funcionario para las observaciones (usando el mismo funcAdmision)
+            let hospo_func_id = null;
+            if (datosPaciente.funcAdmision) {
+              const funcionarioObs = await procesarFuncionario(
+                datosPaciente.funcAdmision
+              );
+              hospo_func_id = funcionarioObs ? funcionarioObs.func_id : null;
+            }
+
+            // Mapear cada observación al formato requerido
+            const observacionesData = observaciones.map((obs) => ({
+              hosp_id: datosExcelDesignado?.Resumen.ctaCorriente,
+              hospo_fecha: obs.historialHistObserv || null,
+              hospo_observacion: obs.evolucionHistObserv || null,
+              hospo_func_id: hospo_func_id,
+            }));
+
+            const resultadoObservaciones =
+              await insertarHospitalizacionObservacionesBulk(observacionesData);
+            console.log(
+              "Observaciones de hospitalización insertadas:",
+              resultadoObservaciones
+            );
+          }
           } else {
             console.log(">> El funcionario de admisión no existe en la BD. Se omitirá la inserción de hospitalización.");
           }
+
+          // 4. Procesar necesidades (HistNecesidades)
+          if (datosExcelDesignado.HistNecesidades) {
+            const necesidades = Array.isArray(datosExcelDesignado.HistNecesidades)
+              ? datosExcelDesignado.HistNecesidades
+              : [datosExcelDesignado.HistNecesidades];
+            const necData = necesidades.map((nec) => {
+              let fecha = nec.fechaHistNec ? dayjs(nec.fechaHistNec) : null;
+              return {
+                hosp_id: datosExcelDesignado?.Resumen?.ctaCorriente,
+                hospon_fecha:
+                  fecha && fecha.isValid() ? fecha.format("YYYY-MM-DD") : null,
+                hospon_observacion: nec.indicacionesHistNec || null,
+                hospon_func_id: nec.hospon_func_id || null,
+              };
+            });
+            const insertedNecesidades =
+              await insertarHospitalizacionNecesidadesBulk(necData);
+            console.log(">> Necesidades insertadas:", insertedNecesidades);
+          }
+          
+
         } else {
           console.log(">> No se especifica funcionario de admisión en DatosPaciente. Se omitirá hospitalización.");
         }
@@ -701,11 +851,11 @@ async function Principal() {
         const evolucionEstado = Array.isArray(datosExcelDesignado.EvolucionEstado)
           ? datosExcelDesignado.EvolucionEstado
           : [datosExcelDesignado.EvolucionEstado];
-        await insertarHospitalizacionRegistroBulk(evolucionEstado);
+        await insertarHospitalizacionRegistroBulk(evolucionEstado, datosExcelDesignado?.Resumen?.ctaCorriente);
       }
 
       // 4. Procesar traslados (sección "Traslados")
-      if (datosExcelDesignado.Traslados) {
+      if (Array.isArray(datosExcelDesignado?.Traslados)) {
         const traslados = Array.isArray(datosExcelDesignado.Traslados)
           ? datosExcelDesignado.Traslados
           : [datosExcelDesignado.Traslados];
@@ -713,7 +863,7 @@ async function Principal() {
         // Se inserta en la tabla paciente_traslado y se captura el resultado.
         // En la función insertarPacienteTrasladoBulk, si falta 'fechaAsigTras' en algún traslado,
         // se omite ese registro (en lugar de lanzar error).
-        console.log("datos del traslado", traslados)
+        console.log("datos del traslado", datosExcelDesignado?.Traslados ? true : false)
         const trasladosInsertados = await insertarPacienteTrasladoBulk(traslados, hosp_id);
         console.log(">> Datos insertados en paciente_traslado:", JSON.stringify(trasladosInsertados, null, 2));
       } else {

@@ -32,9 +32,34 @@ function procesarExcels() {
     });
   }
 
+  //Función para quitar caracteres del texto
+  function clearText(text) {
+    const textFormat1 = text.replace(/(\r\n|\n|\r)/gm, '');
+    const textFormat2 = textFormat1.replace('s/i', '');
+    const finalText = textFormat2.replace(/ktr/g, '');
+    return finalText;
+  }
+
   // Función para formatear fechas (por ejemplo, "2025-02-06")
   function formatDate(dateValue) {
-    return dayjs(dateValue).format("YYYY-MM-DD");
+    // Verificamos si la fecha ya está en el formato deseado ("YYYY-MM-DD")
+    if (dayjs(dateValue, 'YYYY-MM-DD', true).isValid()) {
+      return dateValue;
+    }
+  
+    // Definimos los formatos alternativos que aceptamos
+    const formatosAceptados = ['DD/MM/YYYY', 'YYYY/MM/DD'];
+  
+    // Intentamos interpretar la fecha en cada uno de los formatos aceptados
+    for (const formato of formatosAceptados) {
+      const fecha = dayjs(dateValue, formato, true); // El modo estricto (true) verifica el formato exacto
+      if (fecha.isValid()) {
+        return fecha.format('YYYY-MM-DD');
+      }
+    }
+  
+    // Si ningún formato es válido, se puede manejar el error según tus necesidades
+    return 'Formato de fecha inválido';
   }
 
   // Funciones para extraer texto antes o después de un separador
@@ -82,12 +107,15 @@ function procesarExcels() {
       // -------------------------------
       // HOJA "Resumen"
       // -------------------------------
+      //en caso de no existir una fech
+      const fechaActual = new Date().toLocaleDateString();
+
       if (workbook.SheetNames.includes("Resumen")) {
         const sheet = workbook.Sheets["Resumen"];
         const ctaCorriente = sheet["B2"] ? sheet["B2"].v : null;
-        const fecha = sheet["B3"] ? sheet["B3"].v : null;
-        const fechaform = extractBefore(fecha, "-");
-        const fechaIngreso = fechaform ? formatDate(fechaform) : null;
+        const fecha = sheet["B3"] ? sheet["B3"].v : null; //obtener la fecha de ingreso
+        const fechaform = fecha ? extractBefore(fecha, "-") : null; //extraer la fecha de la hora
+        const fechaIngreso = fechaform ? formatDate(fechaform) : fechaActual;
         const rut = sheet["B4"] ? sheet["B4"].v : null;
         const fechaN = sheet["B5"] ? sheet["B5"].v : null;
         const fechaNac = fechaN ? formatDate(fechaN) : null;
@@ -139,7 +167,7 @@ function procesarExcels() {
         const data = xlsx.utils.sheet_to_json(sheet, { header: 1, range: 3 });
         excelObj.sheets["EvolucionCategoria"] = data
           .map((row) => ({
-            fechaEvo: row[0] ? formatDate(row[0]) : null, // Columna A
+            fechaEvo: row[0] ? formatDate(extractBefore(row[0], " ")) : null, // Columna A
             categoriaRDEvo: row[1] || null, // Columna B
             nomFuncionarioEvo: row[2] || null, // Columna C
           }))
@@ -166,7 +194,7 @@ function procesarExcels() {
             cargoFuncVent = extractAfter(row[3], "/");
           }
           return {
-            fechaVent: row[0] ? formatDate(row[0]) : null,
+            fechaVent: row[0] ? formatDate(extractBefore(row[0], " ")) : null,
             tipoReqVent: row[1] || null,
             estadoCovidVent: row[2] || null,
             funcionarioVent,
@@ -243,7 +271,7 @@ function procesarExcels() {
         const data = xlsx.utils.sheet_to_json(sheet, { header: 1, range: 3 });
         excelObj.sheets["HistObserv"] = data.map((row) => ({
           historialHistObserv: row[0] ? extractBefore(row[0], " ") : null,
-          evolucionHistObserv: row[1] || null,
+          evolucionHistObserv: clearText(row[1]) || null,
         }));
       } else {
         excelObj.sheets["HistObserv"] = {
@@ -259,7 +287,7 @@ function procesarExcels() {
         const data = xlsx.utils.sheet_to_json(sheet, { header: 1, range: 3 });
         excelObj.sheets["HistNecesidades"] = data.map((row) => ({
           fechaHistNec: row[0] ? formatDate(extractBefore(row[0], " ")) : null,
-          indicacionesHistNec: row[1] || null,
+          indicacionesHistNec: clearText(row[1]) || null,
           accionHistNec: row[2] || null,
         }));
       } else {
@@ -276,10 +304,10 @@ function procesarExcels() {
         const rut = sheet["B1"] ? sheet["B1"].v : null;
         const nombrePac = sheet["B2"] ? sheet["B2"].v : null;
         const adm = sheet["B3"] ? sheet["B3"].v : null;
-        const admf = extractBefore(adm, " ");
-        const admision = admf;
+        const admf = adm ? extractBefore(adm, " ") : null;
+        const admision = admf ? formatDate(admf) : null;
         const hos = sheet["B4"] ? sheet["B4"].v : null;
-        const hosp = extractBefore(hos, " ");
+        const hosp = formatDate(extractBefore(hos, " "));
         const hospitalizacion = hosp;
         const egreso = sheet["B5"] ? sheet["B5"].v : null;
         const alergias = sheet["D1"] ? sheet["D1"].v : null;
@@ -315,6 +343,7 @@ function procesarExcels() {
   // ============================================
   // 4. Recorrer la carpeta "data" y procesar cada archivo Excel
   // ============================================
+  const rutaPrueba = "/Pacientes Hospitalizados___/10601519-8"
   const dataDir = path.join(__dirname, "data");
   walkDir(dataDir, (filePath) => {
     // Procesa solo archivos .xlsx (evitando archivos temporales que comiencen con "~$")
