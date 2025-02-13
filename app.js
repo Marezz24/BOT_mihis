@@ -46,11 +46,21 @@ const config = {
     port: 5432,
     user: "postgres",
     password: "soporte010203",
-    database: "mihis",
+    database: "mihis_prod",
     connectionTimeoutMillis: 30000, // 30 segundos (ajustable)
     idleTimeoutMillis: 30000,       // 30 segundos
     max: 20 ,
 };
+
+// async function Principal(){
+//   const client = new Client(config);
+//   const conectado = await client.connect();
+//   if (conectado) {
+//     console.log("conectado")
+//   } else {
+//     console.log("no conectado")
+//   }
+// }
 
 // Función para formatear la fecha (por ejemplo, de "DD/MM/YYYY" a "YYYY-MM-DD")
 const formatSimpleDate = (date, inputFormat = "DD/MM/YYYY") => {
